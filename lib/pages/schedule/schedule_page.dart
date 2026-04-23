@@ -17,13 +17,14 @@ class SchedulePage extends StatefulWidget {
 class _SchedulePageState extends State<SchedulePage> {
   final SettingsService _settings = SettingsService();
   final DatabaseService _db = DatabaseService();
+  final ScrollController _weekScrollController = ScrollController();
 
   List<Lesson> _allLessons = [];
   List<Lesson> _filteredLessons = [];
   bool _isLoading = true;
   String _currentGroup = "09-332 (1)";
   int _currentSubgroup = 1;
-  int _selectedWeek = 4;
+  int _selectedWeek = 1;
 
   int _selectedDayIndex = DateTime.now().weekday == 7 ? 0 : DateTime.now().weekday - 1;
 
@@ -35,13 +36,54 @@ class _SchedulePageState extends State<SchedulePage> {
     _loadInitialData();
   }
 
+  @override
+  void dispose() {
+    _weekScrollController.dispose();
+    super.dispose();
+  }
+
+  int _calculateCurrentWeek(DateTime start) {
+    final now = DateTime.now();
+    if (now.isBefore(start)) return 1;
+    
+    // Находим разницу в днях
+    final diffInDays = now.difference(start).inDays;
+    // (дни / 7) + 1
+    int week = (diffInDays / 7).floor() + 1;
+    
+    // Ограничим разумными пределами для семестра
+    if (week < 1) return 1;
+    if (week > 18) return 18;
+    return week;
+  }
+
   Future<void> _loadInitialData() async {
     final group = await _settings.getGroup() ?? "09-332 (1)";
     final subgroup = await _settings.getSubgroup();
+    
+    // Получаем дату начала семестра из БД или используем 09.02.2026 по умолчанию
+    final semesterStart = await _db.getSemesterStart() ?? DateTime(2026, 2, 9);
+    final currentWeek = _calculateCurrentWeek(semesterStart);
+
     setState(() {
       _currentGroup = group;
       _currentSubgroup = subgroup;
+      _selectedWeek = currentWeek;
     });
+
+    // Авто-скролл к текущей неделе после отрисовки
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_weekScrollController.hasClients) {
+        // Примерная ширина одного элемента "X неделя" ~ 100-110 пикселей с отступами
+        double offset = (_selectedWeek - 1) * 105.0; 
+        _weekScrollController.animateTo(
+          offset,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+
     _loadSchedule();
   }
 
@@ -102,7 +144,7 @@ class _SchedulePageState extends State<SchedulePage> {
           'Расписание $_currentGroup',
           style: const TextStyle(
             color: Colors.black,
-            fontSize: 22,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -124,9 +166,10 @@ class _SchedulePageState extends State<SchedulePage> {
           SizedBox(
             height: 50,
             child: ListView.builder(
+              controller: _weekScrollController, // Привязали контроллер
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: 16,
+              itemCount: 18, // Увеличил до 18 недель
               itemBuilder: (context, index) {
                 final weekNum = index + 1;
                 final isSelected = _selectedWeek == weekNum;

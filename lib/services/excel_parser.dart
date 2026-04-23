@@ -112,62 +112,136 @@ class ExcelParser {
   }
 
   void _addLesson(String rawText, String time, int day, int sub, List<Lesson> lessons) {
-    String text = rawText.replaceAll('\n', ' ').trim();
-    if (text.length < 3) return;
+    // 1. Разбиваем ячейку по ';' на случай, если там несколько пар
+    List<String> rawParts = rawText.split(';');
 
-    // Регулярки для парсинга
-    final weekRegex = RegExp(r'\((.* нед.)\)?'); // Все что в первых скобках
-    final teacherRegex = RegExp(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)'); // Фамилия И.О.
-    final roomRegex = RegExp(r'(ауд\.)\s*(.*)'); // Аудитория
+    for (String part in rawParts) {
+      String text = part.replaceAll('\n', ' ').trim();
+      if (text.length < 3) continue;
 
-    String weeks = "";
-    String teacher = "";
-    String room = "";
-    String name = text;
+      // ОБНОВЛЕННЫЕ РЕГУЛЯРКИ
+      // Ищет скобки, внутри которых есть слово "нед", не захватывая лишнее
+      final weekRegex = RegExp(r'\(([^)]*нед\.[^)]*)\)');
+      // Поддерживает как "Иванов И.И.", так и "Иванов И. И."
+      final teacherRegex = RegExp(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]\.)');
+      // Захватывает "ауд." и всё после неё до конца строки
+      final roomRegex = RegExp(r'(ауд\.\s*.*)');
 
-    // 1. Извлекаем недели
-    final weekMatch = weekRegex.firstMatch(text);
-    if (weekMatch != null) {
-      weeks = weekMatch.group(0)!;
-      name = name.replaceFirst(weeks, '').trim();
+      String weeks = "";
+      String teacher = "";
+      String room = "";
+      String name = text;
+
+      // 1. Извлекаем недели
+      final weekMatch = weekRegex.firstMatch(name);
+      if (weekMatch != null) {
+        weeks = weekMatch.group(0)!;
+        name = name.replaceFirst(weeks, '').trim();
+      }
+
+      // 2. Извлекаем аудиторию (ищем с конца, чтобы не отрезать ФИО, если оно после ауд.)
+      final roomMatch = roomRegex.firstMatch(name);
+      if (roomMatch != null) {
+        room = roomMatch.group(0)!;
+        name = name.replaceFirst(room, '').trim();
+      }
+
+      // 3. Извлекаем преподавателя
+      final teacherMatch = teacherRegex.firstMatch(name);
+      if (teacherMatch != null) {
+        teacher = teacherMatch.group(0)!;
+        name = name.replaceFirst(teacher, '').trim();
+      }
+
+      // Финальная очистка названия предмета от мусора
+      name = name.replaceAll(RegExp(r'[,.\s]+$'), '').trim();
+      name = name.replaceAll(RegExp(r'\s{2,}'), ' ').trim(); // убираем двойные пробелы
+
+      // Определяем тип недели
+      String lowerText = text.toLowerCase();
+      WeekType type = WeekType.both;
+      if (lowerText.contains('н/н') || lowerText.contains('нечет')) {
+        type = WeekType.odd;
+      } else if (lowerText.contains('ч/н') || lowerText.contains('чет')) {
+        type = WeekType.even;
+      }
+
+      if (name.isEmpty) {
+        // Сохраняем исходный сырой текст, чтобы в админке было понятно, что там вообще написано!
+        name = "ОШИБКА: $text";
+      }
+
+      // Добавляем ВСЕГДА. Если что-то не так, админ увидит это по флагу "ОШИБКА"
+      lessons.add(Lesson(
+        name: name,
+        teacher: teacher,
+        room: room,
+        weeks: weeks,
+        time: time,
+        dayOfWeek: day,
+        weekType: type,
+        subgroup: sub,
+      ));
     }
-
-    // 2. Извлекаем аудиторию
-    final roomMatch = roomRegex.firstMatch(name);
-    if (roomMatch != null) {
-      room = roomMatch.group(0)!;
-      name = name.replaceFirst(room, '').trim();
-    }
-
-    // 3. Извлекаем преподавателя
-    final teacherMatch = teacherRegex.firstMatch(name);
-    if (teacherMatch != null) {
-      teacher = teacherMatch.group(0)!;
-      name = name.replaceFirst(teacher, '').trim();
-    }
-
-    // Убираем лишние точки и запятые в конце названия
-    name = name.replaceAll(RegExp(r'[,.\s]+$'), '').trim();
-
-    String lowerText = text.toLowerCase();
-    WeekType type = WeekType.both;
-    if (lowerText.contains('н/н')) {
-      type = WeekType.odd;
-    } else if (lowerText.contains('ч/н')) {
-      type = WeekType.even;
-    }
-
-    lessons.add(Lesson(
-      name: name,
-      teacher: teacher,
-      room: room,
-      weeks: weeks,
-      time: time,
-      dayOfWeek: day,
-      weekType: type,
-      subgroup: sub,
-    ));
   }
+
+  // void _addLesson(String rawText, String time, int day, int sub, List<Lesson> lessons) {
+  //   String text = rawText.replaceAll('\n', ' ').trim();
+  //   if (text.length < 3) return;
+  //
+  //   // Регулярки для парсинга
+  //   final weekRegex = RegExp(r'\((.* нед.)\)?'); // Все что в первых скобках
+  //   final teacherRegex = RegExp(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)'); // Фамилия И.О.
+  //   final roomRegex = RegExp(r'(ауд\.)\s*(.*)'); // Аудитория
+  //
+  //   String weeks = "";
+  //   String teacher = "";
+  //   String room = "";
+  //   String name = text;
+  //
+  //   // 1. Извлекаем недели
+  //   final weekMatch = weekRegex.firstMatch(text);
+  //   if (weekMatch != null) {
+  //     weeks = weekMatch.group(0)!;
+  //     name = name.replaceFirst(weeks, '').trim();
+  //   }
+  //
+  //   // 2. Извлекаем аудиторию
+  //   final roomMatch = roomRegex.firstMatch(name);
+  //   if (roomMatch != null) {
+  //     room = roomMatch.group(0)!;
+  //     name = name.replaceFirst(room, '').trim();
+  //   }
+  //
+  //   // 3. Извлекаем преподавателя
+  //   final teacherMatch = teacherRegex.firstMatch(name);
+  //   if (teacherMatch != null) {
+  //     teacher = teacherMatch.group(0)!;
+  //     name = name.replaceFirst(teacher, '').trim();
+  //   }
+  //
+  //   // Убираем лишние точки и запятые в конце названия
+  //   name = name.replaceAll(RegExp(r'[,.\s]+$'), '').trim();
+  //
+  //   String lowerText = text.toLowerCase();
+  //   WeekType type = WeekType.both;
+  //   if (lowerText.contains('н/н')) {
+  //     type = WeekType.odd;
+  //   } else if (lowerText.contains('ч/н')) {
+  //     type = WeekType.even;
+  //   }
+  //
+  //   lessons.add(Lesson(
+  //     name: name,
+  //     teacher: teacher,
+  //     room: room,
+  //     weeks: weeks,
+  //     time: time,
+  //     dayOfWeek: day,
+  //     weekType: type,
+  //     subgroup: sub,
+  //   ));
+  // }
 
   dynamic _getCellValue(Sheet sheet, int col, int row) {
     var startCell = _getMergeStart(sheet, col, row);

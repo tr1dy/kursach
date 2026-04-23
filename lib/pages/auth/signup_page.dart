@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_project/services/snack_bar.dart';
 import 'package:email_validator/email_validator.dart';
+import 'package:flutter_project/services/database_service.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -17,6 +18,7 @@ class _SignUpScreen extends State<SignUpScreen> {
   TextEditingController passwordTextRepeatInputController =
   TextEditingController();
   final formKey = GlobalKey<FormState>();
+  final DatabaseService _databaseService = DatabaseService();
 
   @override
   void dispose() {
@@ -42,10 +44,20 @@ class _SignUpScreen extends State<SignUpScreen> {
     }
 
     try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      // 1. Создаем пользователя в Auth
+      final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: emailTextInputController.text.trim(),
         password: passwordTextInputController.text.trim(),
       );
+
+      // 2. Создаем профиль в Firestore
+      if (userCredential.user != null) {
+        await _databaseService.createUserProfile(
+          userCredential.user!.uid,
+          userCredential.user!.email!,
+        );
+      }
+
       if (mounted) Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } on FirebaseAuthException catch (e) {
       String message = 'Произошла ошибка';

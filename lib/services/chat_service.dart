@@ -7,25 +7,33 @@ class ChatService {
   // Генерируем уникальный ID комнаты для двух пользователей
   String getChatRoomId(String userId1, String userId2) {
     List<String> ids = [userId1, userId2];
-    ids.sort(); // Сортируем по алфавиту, чтобы порядок всегда был одинаковым
+    ids.sort(); // Сортируем по алфавиту
     return ids.join('_');
   }
 
-  // Получаем поток сообщений для конкретного чата
+  // Получаем поток сообщений
   Stream<List<ChatMessage>> getMessages(String chatId) {
     return _db
         .collection('chats')
         .doc(chatId)
         .collection('messages')
-        .orderBy('timestamp', descending: true) // Свежие сверху для ListView
+        .orderBy('timestamp', descending: true)
         .snapshots()
         .map((snapshot) => snapshot.docs
         .map((doc) => ChatMessage.fromMap(doc.data()))
         .toList());
   }
 
-  // Отправка сообщения
-  Future<void> sendMessage(String chatId, ChatMessage message) async {
+  // Отправка сообщения с инициализацией чата
+  Future<void> sendMessage(String chatId, ChatMessage message, List<String> participants) async {
+    // 1. Создаем/обновляем заголовок чата, чтобы он появился в списке активных
+    await _db.collection('chats').doc(chatId).set({
+      'participants': participants,
+      'lastMessage': message.text,
+      'lastMessageTimestamp': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // 2. Добавляем само сообщение
     await _db
         .collection('chats')
         .doc(chatId)

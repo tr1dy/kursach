@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_project/design/icons.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_project/design/colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/teacher.dart';
 import '../../services/database_service.dart';
+import 'teacher_details_page.dart';
 
 class TeachersPage extends StatefulWidget {
   const TeachersPage({super.key});
@@ -31,13 +30,15 @@ class _TeachersPageState extends State<TeachersPage> {
     setState(() => _isLoading = true);
     try {
       final teachers = await _db.getTeachers();
-      setState(() {
-        _allTeachers = teachers;
-        _filteredTeachers = teachers;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _allTeachers = teachers;
+          _filteredTeachers = teachers;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -49,32 +50,6 @@ class _TeachersPageState extends State<TeachersPage> {
             t.shortName.toLowerCase().contains(query.toLowerCase()))
           .toList();
     });
-  }
-
-  // Временная функция для запуска синхронизации
-  Future<void> _showSyncDialog() async {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Синхронизация"),
-        content: const Text("Найти новых преподавателей в расписаниях и добавить их в список?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              setState(() => _isLoading = true);
-              await _db.syncTeachersFromSchedules();
-              await _loadTeachers();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("База преподавателей обновлена")),
-              );
-            },
-            child: const Text("Синхронизировать"),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -94,17 +69,11 @@ class _TeachersPageState extends State<TeachersPage> {
         backgroundColor: backgroundColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        centerTitle: true,
         title: const Text(
           'Преподаватели',
           style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold),
         ),
-        actions: [
-          IconButton(
-            icon: SvgPicture.asset(AppIcons.menu),
-            onPressed: _showSyncDialog, // Временно вызываем синхронизацию здесь
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: Column(
         children: [
@@ -117,6 +86,7 @@ class _TeachersPageState extends State<TeachersPage> {
                 hintText: "Поиск преподавателя...",
                 filled: true,
                 fillColor: Colors.white,
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(15),
                   borderSide: BorderSide.none,
@@ -132,17 +102,10 @@ class _TeachersPageState extends State<TeachersPage> {
                 : RefreshIndicator(
                     onRefresh: _loadTeachers,
                     child: _filteredTeachers.isEmpty
-                        ? ListView( // Используем ListView чтобы RefreshIndicator работал
+                        ? ListView(
                             children: [
                               SizedBox(height: MediaQuery.of(context).size.height * 0.3),
                               const Center(child: Text("Преподаватели не найдены")),
-                              if (_allTeachers.isEmpty)
-                                const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.only(top: 8.0),
-                                    child: Text("Нажмите на иконку меню для синхронизации", style: TextStyle(color: Colors.grey)),
-                                  ),
-                                ),
                             ],
                           )
                         : ListView.builder(
@@ -161,7 +124,6 @@ class _TeachersPageState extends State<TeachersPage> {
   }
 
   Widget _buildTeacherCard(Teacher teacher) {
-    // Отображаем полное имя, если оно есть, иначе короткое
     String displayName = teacher.fullName.isNotEmpty ? teacher.fullName : teacher.shortName;
     
     return Card(
@@ -202,8 +164,14 @@ class _TeachersPageState extends State<TeachersPage> {
           ],
         ),
         trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-        onTap: () {
-          // Скоро добавим страницу деталей
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TeacherDetailsPage(teacher: teacher),
+            ),
+          );
+          _loadTeachers();
         },
       ),
     );

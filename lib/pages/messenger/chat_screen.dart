@@ -23,14 +23,15 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
 
   late String _currentChatId;
+  late Stream<List<ChatMessage>> _messageStream;
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
   @override
   void initState() {
     super.initState();
-    // Генерируем уникальную комнату при открытии чата
     if (currentUser != null) {
       _currentChatId = _chatService.getChatRoomId(currentUser!.uid, widget.receiverId);
+      _messageStream = _chatService.getMessages(_currentChatId);
     }
   }
 
@@ -44,7 +45,13 @@ class _ChatScreenState extends State<ChatScreen> {
       timestamp: DateTime.now(),
     );
 
-    await _chatService.sendMessage(_currentChatId, message);
+    // Отправляем сообщение и обновляем список участников чата
+    await _chatService.sendMessage(
+      _currentChatId, 
+      message, 
+      [currentUser!.uid, widget.receiverId]
+    );
+
     _messageController.clear();
   }
 
@@ -67,7 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<ChatMessage>>(
-              stream: _chatService.getMessages(_currentChatId),
+              stream: _messageStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -78,7 +85,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
                 final messages = snapshot.data!;
                 return ListView.builder(
-                  reverse: true, // Новые сообщения снизу
+                  reverse: true,
                   padding: const EdgeInsets.all(16),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
@@ -97,6 +104,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageBubble(ChatMessage msg, bool isMe) {
+    final now = DateTime.now();
+    final isToday = msg.timestamp.day == now.day && 
+                    msg.timestamp.month == now.month && 
+                    msg.timestamp.year == now.year;
+
+    final String timeStr = "${msg.timestamp.hour.toString().padLeft(2, '0')}:${msg.timestamp.minute.toString().padLeft(2, '0')}";
+    final String dateStr = "${msg.timestamp.day.toString().padLeft(2, '0')}.${msg.timestamp.month.toString().padLeft(2, '0')}";
+    
+    final String fullDateTime = isToday ? timeStr : "$dateStr $timeStr";
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -120,16 +137,34 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (!isMe)
-              Text(
-                msg.senderName,
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: textColor),
-              ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isMe)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      msg.senderName,
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: textColor),
+                    ),
+                  ),
+                Text(
+                  msg.text,
+                  style: TextStyle(color: isMe ? Colors.white : Colors.black, fontSize: 15),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
             Text(
-              msg.text,
-              style: TextStyle(color: isMe ? Colors.white : Colors.black, fontSize: 15),
+              fullDateTime,
+              style: TextStyle(
+                fontSize: 10,
+                color: isMe ? Colors.white70 : Colors.black54,
+              ),
             ),
           ],
         ),

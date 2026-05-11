@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_project/design/colors.dart';
 import 'package:flutter_project/services/database_service.dart';
+import 'package:flutter_project/services/excel_parser.dart';
 import 'package:flutter_project/pages/admin/teacher_editor_page.dart';
+import 'package:flutter_project/pages/admin/user_management_page.dart';
+import 'package:flutter_project/pages/admin/schedule_editor_page.dart';
 
 class AdminPanelPage extends StatefulWidget {
   const AdminPanelPage({super.key});
@@ -12,6 +15,7 @@ class AdminPanelPage extends StatefulWidget {
 
 class _AdminPanelPageState extends State<AdminPanelPage> {
   final DatabaseService _db = DatabaseService();
+  final ExcelParser _excelParser = ExcelParser();
   DateTime? _semesterStart;
 
   @override
@@ -25,7 +29,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     setState(() => _semesterStart = start);
   }
 
-  // Вспомогательный метод для форматирования даты
   String _formatDate(DateTime date) {
     return "${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}";
   }
@@ -56,6 +59,70 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     }
   }
 
+  Future<void> _importSchedule() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text("Импорт расписания из Excel...", style: TextStyle(fontWeight: FontWeight.bold)),
+                Text("Это может занять минуту", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // 1. Получаем список групп из файла
+      final groups = await _excelParser.getGroups();
+      if (groups.isEmpty) throw "Список групп в файле пуст";
+
+      List<String> allGroupSubgroups = [];
+
+      // 2. Для каждой группы парсим 1 и 2 подгруппы
+      for (String groupName in groups) {
+        for (int subgroup in [1, 2]) {
+          final lessons = await _excelParser.parseSchedule(groupName, subgroup: subgroup);
+          if (lessons.isNotEmpty) {
+            final String fullId = "$groupName ($subgroup)";
+            await _db.saveSchedule(fullId, lessons);
+            allGroupSubgroups.add(fullId);
+          }
+        }
+      }
+
+      // 3. Сохраняем общий список групп для поиска
+      allGroupSubgroups.sort();
+      await _db.saveGroupsList(allGroupSubgroups);
+
+      // 4. Синхронизируем преподавателей
+      await _db.syncTeachersFromSchedules();
+
+      if (mounted) {
+        Navigator.pop(context); // Закрываем диалог загрузки
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Успешно импортировано ${allGroupSubgroups.length} групп")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка импорта: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -70,6 +137,28 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _buildAdminCard(
+            title: "Управление пользователями",
+            subtitle: "Назначение ролей (студент, препод, админ)",
+            icon: Icons.people_alt_outlined,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (c) => const UserManagementPage()),
+              );
+            },
+          ),
+          _buildAdminCard(
+            title: "Редактор расписания",
+            subtitle: "Ручная правка предметов, времени и недель",
+            icon: Icons.edit_calendar_outlined,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (c) => const ScheduleEditorPage()),
+              );
+            },
+          ),
           _buildAdminCard(
             title: "Настройки семестра",
             subtitle: _semesterStart != null 
@@ -109,12 +198,10 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
             },
           ),
           _buildAdminCard(
-            title: "Управление расписанием",
-            subtitle: "Загрузка Excel (в разработке)",
-            icon: Icons.table_chart,
-            onTap: () {
-              // Здесь позже будет кнопка для импорта Excel
-            },
+            title: "Загрузка расписания",
+            subtitle: "Обновить базу из файла в assets/data",
+            icon: Icons.cloud_upload_outlined,
+            onTap: _importSchedule,
           ),
         ],
       ),

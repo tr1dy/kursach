@@ -8,6 +8,9 @@ class ExcelParser {
   static int? _cachedSubgroup;
   static List<String>? _cachedGroupsList;
 
+  // Текущий файл расписания в ассетах
+  static const String currentExcelPath = "assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx";
+
   final List<String> timeSlots = [
     "08:30 - 10:00",
     "10:10 - 11:40",
@@ -21,7 +24,7 @@ class ExcelParser {
   Future<List<String>> getGroups() async {
     if (_cachedGroupsList != null) return _cachedGroupsList!;
     try {
-      ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
+      ByteData data = await rootBundle.load(currentExcelPath);
       var excel = Excel.decodeBytes(data.buffer.asUint8List());
       var sheet = excel.tables.values.first;
       Set<String> groups = {};
@@ -30,6 +33,7 @@ class ExcelParser {
         var val = _getCellValue(sheet, col, 16);
         if (val != null) {
           String s = val.toString().trim();
+          // Простая проверка, что это похоже на номер группы (например, 09-332)
           if (s.length >= 5 && (s.contains('-') || s.startsWith('09-'))) {
             groups.add(s);
           }
@@ -38,6 +42,7 @@ class ExcelParser {
       _cachedGroupsList = groups.toList()..sort();
       return _cachedGroupsList!;
     } catch (e) {
+      print("Ошибка получения списка групп: $e");
       return [];
     }
   }
@@ -49,7 +54,7 @@ class ExcelParser {
 
     List<Lesson> lessons = [];
     try {
-      ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_17.02.2026.xlsx");
+      ByteData data = await rootBundle.load(currentExcelPath);
       var excel = Excel.decodeBytes(data.buffer.asUint8List());
       var sheet = excel.tables.values.first;
 
@@ -57,6 +62,7 @@ class ExcelParser {
       for (int col = 0; col < sheet.maxColumns; col++) {
         var val = _getCellValue(sheet, col, 16);
         if (val != null && val.toString().trim() == groupName) {
+          // Обычно подгруппа 1 - это колонка группы, подгруппа 2 - следующая
           groupColIndex = col + (subgroup - 1);
           break;
         }
@@ -90,7 +96,7 @@ class ExcelParser {
       _cachedGroupName = groupName;
       _cachedSubgroup = subgroup;
     } catch (e) {
-      print("Ошибка парсинга: $e");
+      print("Ошибка парсинга группы $groupName: $e");
     }
     return lessons;
   }
@@ -112,61 +118,66 @@ class ExcelParser {
   }
 
   void _addLesson(String rawText, String time, int day, int sub, List<Lesson> lessons) {
-    String text = rawText.replaceAll('\n', ' ').trim();
-    if (text.length < 3) return;
+    List<String> rawParts = rawText.split(';');
 
-    // Регулярки для парсинга
-    final weekRegex = RegExp(r'\((.* нед.)\)?'); // Все что в первых скобках
-    final teacherRegex = RegExp(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)'); // Фамилия И.О.
-    final roomRegex = RegExp(r'(ауд\.)\s*(.*)'); // Аудитория
+    for (String part in rawParts) {
+      String text = part.replaceAll('\n', ' ').trim();
+      if (text.length < 3) continue;
 
-    String weeks = "";
-    String teacher = "";
-    String room = "";
-    String name = text;
+      final weekRegex = RegExp(r'\(([^)]*нед\.[^)]*)\)');
+      final teacherRegex = RegExp(r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s?[А-ЯЁ]\.)');
+      final roomRegex = RegExp(r'(ауд\.\s*.*)');
 
-    // 1. Извлекаем недели
-    final weekMatch = weekRegex.firstMatch(text);
-    if (weekMatch != null) {
-      weeks = weekMatch.group(0)!;
-      name = name.replaceFirst(weeks, '').trim();
+      String weeks = "";
+      String teacher = "";
+      String room = "";
+      String name = text;
+
+      final weekMatch = weekRegex.firstMatch(name);
+      if (weekMatch != null) {
+        weeks = weekMatch.group(0)!;
+        name = name.replaceFirst(weeks, '').trim();
+      }
+
+      final roomMatch = roomRegex.firstMatch(name);
+      if (roomMatch != null) {
+        room = roomMatch.group(0)!;
+        name = name.replaceFirst(room, '').trim();
+      }
+
+      final teacherMatch = teacherRegex.firstMatch(name);
+      if (teacherMatch != null) {
+        teacher = teacherMatch.group(0)!;
+        name = name.replaceFirst(teacher, '').trim();
+      }
+
+      name = name.replaceAll(RegExp(r'[,.\s]+$'), '').trim();
+      name = name.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+
+      String lowerText = text.toLowerCase();
+      WeekType type = WeekType.both;
+      if (lowerText.contains('н/н') || lowerText.contains('нечет')) {
+        type = WeekType.odd;
+      } else if (lowerText.contains('ч/н') || lowerText.contains('чет')) {
+        type = WeekType.even;
+      }
+
+      if (name.isEmpty) {
+        name = "Неизвестный предмет (ошибка парсинга)";
+      }
+
+      lessons.add(Lesson(
+        name: name,
+        teacher: teacher,
+        room: room,
+        weeks: weeks,
+        time: time,
+        dayOfWeek: day,
+        weekType: type,
+        subgroup: sub,
+        rawText: text,
+      ));
     }
-
-    // 2. Извлекаем аудиторию
-    final roomMatch = roomRegex.firstMatch(name);
-    if (roomMatch != null) {
-      room = roomMatch.group(0)!;
-      name = name.replaceFirst(room, '').trim();
-    }
-
-    // 3. Извлекаем преподавателя
-    final teacherMatch = teacherRegex.firstMatch(name);
-    if (teacherMatch != null) {
-      teacher = teacherMatch.group(0)!;
-      name = name.replaceFirst(teacher, '').trim();
-    }
-
-    // Убираем лишние точки и запятые в конце названия
-    name = name.replaceAll(RegExp(r'[,.\s]+$'), '').trim();
-
-    String lowerText = text.toLowerCase();
-    WeekType type = WeekType.both;
-    if (lowerText.contains('н/н')) {
-      type = WeekType.odd;
-    } else if (lowerText.contains('ч/н')) {
-      type = WeekType.even;
-    }
-
-    lessons.add(Lesson(
-      name: name,
-      teacher: teacher,
-      room: room,
-      weeks: weeks,
-      time: time,
-      dayOfWeek: day,
-      weekType: type,
-      subgroup: sub,
-    ));
   }
 
   dynamic _getCellValue(Sheet sheet, int col, int row) {

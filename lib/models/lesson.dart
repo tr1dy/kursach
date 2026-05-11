@@ -9,6 +9,8 @@ class Lesson {
   final WeekType weekType;
   final int subgroup;
   final String weeks;
+  final String rawText;
+  final List<String> targetGroups;
 
   Lesson({
     required this.name,
@@ -19,5 +21,7 @@ class Lesson {
     required this.weekType,
     required this.subgroup,
     this.weeks = "",
+    this.rawText = "",
+    this.targetGroups = const [],
   });
 }

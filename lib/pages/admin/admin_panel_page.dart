@@ -97,6 +97,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
 
     try {
+      _excelParser.clearCache();
       // 1. Декодируем Excel ОДИН раз (самая тяжелая операция)
       final Excel excel = _excelParser.decode(fileBytes);
       

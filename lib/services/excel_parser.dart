@@ -44,6 +44,13 @@ class ExcelParser {
     return _spansCache?["$col-$row"] ?? CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row);
   }
 
+  String _cleanGroupName(String raw) {
+    return raw
+        .replaceAll(RegExp(r'\s*\(\d+\).*$'), '') // Убирает " (1)" или "(2)"
+        .replaceAll(RegExp(r'\s+\d+\s*подгр.*$', caseSensitive: false), '') // Убирает " 1 подгруппа"
+        .trim();
+  }
+
   List<String> getGroupsFromExcel(Excel excel) {
     try {
       var sheet = excel.tables.values.first;
@@ -55,7 +62,7 @@ class ExcelParser {
         if (val != null) {
           String s = val.toString().trim();
           if (s.length >= 5 && (s.contains('-') || s.startsWith('09-'))) {
-            groups.add(s);
+            groups.add(_cleanGroupName(s));
           }
         }
       }
@@ -77,10 +84,14 @@ class ExcelParser {
 
       int groupColIndex = -1;
       for (int col = 0; col < sheet.maxColumns; col++) {
-        var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 16));
-        if (cell.value != null && cell.value.toString().trim() == groupName) {
-          groupColIndex = col + (subgroup - 1);
-          break;
+        var cell = sheet.cell(
+            CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 16));
+        if (cell.value != null) {
+          String cellValue = cell.value.toString().trim();
+          if (_cleanGroupName(cellValue) == groupName) {
+            groupColIndex = col + (subgroup - 1);
+            break;
+          }
         }
       }
 

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_project/design/colors.dart';
 import 'package:flutter_project/services/database_service.dart';
@@ -59,7 +61,22 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     }
   }
 
-  Future<void> _importSchedule() async {
+  Future<void> _pickAndImportSchedule() async {
+    // 1. Выбираем файл локально
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      withData: true, // Это важно: получаем байты файла в память
+    );
+
+    if (result == null || result.files.isEmpty) return;
+    
+    Uint8List? fileBytes = result.files.first.bytes;
+    String fileName = result.files.first.name;
+
+    if (fileBytes == null) return;
+
+    if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -72,8 +89,8 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 16),
-                Text("Импорт расписания из Excel...", style: TextStyle(fontWeight: FontWeight.bold)),
-                Text("Это может занять минуту", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text("Обработка расписания...", style: TextStyle(fontWeight: FontWeight.bold)),
+                Text("Парсим Excel и обновляем базу данных", style: TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
           ),
@@ -82,42 +99,80 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
 
     try {
-      // 1. Получаем список групп из файла
-      final groups = await _excelParser.getGroups();
-      if (groups.isEmpty) throw "Список групп в файле пуст";
+      // 2. Получаем список групп из байтов (БЕЗ загрузки в Storage)
+      final groups = await _excelParser.getGroupsFromBytes(fileBytes);
+      if (groups.isEmpty) throw "Список групп в файле пуст или формат неверен";
 
       List<String> allGroupSubgroups = [];
+      Map<String, List<Map<String, dynamic>>> teacherSchedules = {};
 
-      // 2. Для каждой группы парсим 1 и 2 подгруппы
+      // 3. Парсим данные
       for (String groupName in groups) {
         for (int subgroup in [1, 2]) {
-          final lessons = await _excelParser.parseSchedule(groupName, subgroup: subgroup);
+          final lessons = await _excelParser.parseScheduleFromBytes(fileBytes, groupName, subgroup: subgroup);
           if (lessons.isNotEmpty) {
             final String fullId = "$groupName ($subgroup)";
             await _db.saveSchedule(fullId, lessons);
             allGroupSubgroups.add(fullId);
+
+            for (var l in lessons) {
+              if (l.teacher.isNotEmpty) {
+                final teacherName = l.teacher.trim();
+                teacherSchedules.putIfAbsent(teacherName, () => []);
+                
+                var lessonMap = {
+                  'name': l.name,
+                  'teacher': l.teacher,
+                  'room': l.room,
+                  'time': l.time,
+                  'dayOfWeek': l.dayOfWeek,
+                  'weekType': l.weekType.index,
+                  'weeks': l.weeks,
+                  'targetGroups': [fullId],
+                };
+                
+                var existing = teacherSchedules[teacherName]!.firstWhere(
+                  (existingLesson) => 
+                    existingLesson['time'] == lessonMap['time'] && 
+                    existingLesson['dayOfWeek'] == lessonMap['dayOfWeek'] &&
+                    existingLesson['name'] == lessonMap['name'] &&
+                    existingLesson['weeks'] == lessonMap['weeks'],
+                  orElse: () => {},
+                );
+
+                if (existing.isNotEmpty) {
+                  if (!(existing['targetGroups'] as List).contains(fullId)) {
+                    (existing['targetGroups'] as List).add(fullId);
+                  }
+                } else {
+                  teacherSchedules[teacherName]!.add(lessonMap);
+                }
+              }
+            }
           }
         }
       }
 
-      // 3. Сохраняем общий список групп для поиска
+      // 4. Сохраняем оптимизированные данные для преподавателей
+      for (var teacherName in teacherSchedules.keys) {
+        await _db.saveTeacherSchedule(teacherName, teacherSchedules[teacherName]!);
+      }
+
       allGroupSubgroups.sort();
       await _db.saveGroupsList(allGroupSubgroups);
-
-      // 4. Синхронизируем преподавателей
       await _db.syncTeachersFromSchedules();
 
       if (mounted) {
-        Navigator.pop(context); // Закрываем диалог загрузки
+        Navigator.pop(context); // Закрываем диалог
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Успешно импортировано ${allGroupSubgroups.length} групп")),
+          SnackBar(content: Text("Расписание из файла $fileName успешно импортировано")),
         );
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка импорта: $e"), backgroundColor: Colors.red),
+          SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
         );
       }
     }
@@ -128,7 +183,8 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text("Панель администратора", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        title: const Text("Панель администратора", style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 1,
@@ -139,25 +195,15 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
         children: [
           _buildAdminCard(
             title: "Управление пользователями",
-            subtitle: "Назначение ролей (студент, препод, админ)",
+            subtitle: "Назначение ролей и прав доступа",
             icon: Icons.people_alt_outlined,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (c) => const UserManagementPage()),
-              );
-            },
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const UserManagementPage())),
           ),
           _buildAdminCard(
             title: "Редактор расписания",
-            subtitle: "Ручная правка предметов, времени и недель",
+            subtitle: "Ручная правка предметов и времени",
             icon: Icons.edit_calendar_outlined,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (c) => const ScheduleEditorPage()),
-              );
-            },
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const ScheduleEditorPage())),
           ),
           _buildAdminCard(
             title: "Настройки семестра",
@@ -169,39 +215,28 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
           ),
           _buildAdminCard(
             title: "Синхронизация преподавателей",
-            subtitle: "Найти новые имена в расписании",
+            subtitle: "Обновить базу преподавателей",
             icon: Icons.sync,
             onTap: () async {
-              showDialog(
-                context: context, 
-                barrierDismissible: false,
-                builder: (c) => const Center(child: CircularProgressIndicator())
-              );
+              showDialog(context: context, barrierDismissible: false, builder: (c) => const Center(child: CircularProgressIndicator()));
               await _db.syncTeachersFromSchedules();
               if (mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Синхронизация завершена")),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Синхронизация завершена")));
               }
             },
           ),
           _buildAdminCard(
             title: "Редактор преподавателей",
-            subtitle: "Добавление полных ФИО и данных",
+            subtitle: "Правка ФИО и данных кафедр",
             icon: Icons.person_search,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (c) => const TeacherEditorPage()),
-              );
-            },
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (c) => const TeacherEditorPage())),
           ),
           _buildAdminCard(
             title: "Загрузка расписания",
-            subtitle: "Обновить базу из файла в assets/data",
+            subtitle: "Выбрать .xlsx файл и обновить базу",
             icon: Icons.cloud_upload_outlined,
-            onTap: _importSchedule,
+            onTap: _pickAndImportSchedule,
           ),
         ],
       ),

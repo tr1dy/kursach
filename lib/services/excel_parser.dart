@@ -1,13 +1,8 @@
 import 'dart:typed_data';
 import 'package:excel/excel.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import '../models/lesson.dart';
 
 class ExcelParser {
-  static List<Lesson>? _cachedLessons;
-  static String? _cachedGroupName;
-  static int? _cachedSubgroup;
-
   final List<String> timeSlots = [
     "08:30 - 10:00",
     "10:10 - 11:40",
@@ -18,15 +13,45 @@ class ExcelParser {
     "19:10 - 20:40",
   ];
 
-  // получение списка групп
-  Future<List<String>> getGroupsFromBytes(Uint8List bytes) async {
+  // Кеш для объединенных ячеек текущего листа
+  Map<String, CellIndex>? _spansCache;
+
+  Excel decode(Uint8List bytes) {
+    return Excel.decodeBytes(bytes);
+  }
+
+  // Подготавливаем кеш объединений для конкретного листа
+  void _prepareSpansCache(Sheet sheet) {
+    _spansCache = {};
+    for (var span in sheet.spannedItems) {
+      final range = span.toString().split('!').last.replaceAll('\$', '');
+      final parts = range.split(':');
+      
+      if (parts.length == 2) {
+        final start = CellIndex.indexByString(parts[0]);
+        final end = CellIndex.indexByString(parts[1]);
+        
+        for (int r = start.rowIndex; r <= end.rowIndex; r++) {
+          for (int c = start.columnIndex; c <= end.columnIndex; c++) {
+            _spansCache!["$c-$r"] = start;
+          }
+        }
+      }
+    }
+  }
+
+  CellIndex _getMergeStartFast(int col, int row) {
+    return _spansCache?["$col-$row"] ?? CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row);
+  }
+
+  List<String> getGroupsFromExcel(Excel excel) {
     try {
-      var excel = Excel.decodeBytes(bytes);
       var sheet = excel.tables.values.first;
       Set<String> groups = {};
 
       for (int col = 0; col < sheet.maxColumns; col++) {
-        var val = _getCellValue(sheet, col, 16);
+        var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 16));
+        var val = cell.value;
         if (val != null) {
           String s = val.toString().trim();
           if (s.length >= 5 && (s.contains('-') || s.startsWith('09-'))) {
@@ -34,25 +59,26 @@ class ExcelParser {
           }
         }
       }
-      var list = groups.toList()..sort();
-      return list;
+      return groups.toList()..sort();
     } catch (e) {
-      print("Ошибка получения групп из байтов: $e");
+      print("Ошибка получения групп: $e");
       return [];
     }
   }
 
-  // парсинг конкретной группы
-  Future<List<Lesson>> parseScheduleFromBytes(Uint8List bytes, String groupName, {int subgroup = 1}) async {
+  List<Lesson> parseScheduleFromExcel(Excel excel, String groupName, {int subgroup = 1}) {
     List<Lesson> lessons = [];
     try {
-      var excel = Excel.decodeBytes(bytes);
       var sheet = excel.tables.values.first;
+      
+      if (_spansCache == null) {
+        _prepareSpansCache(sheet);
+      }
 
       int groupColIndex = -1;
       for (int col = 0; col < sheet.maxColumns; col++) {
-        var val = _getCellValue(sheet, col, 16);
-        if (val != null && val.toString().trim() == groupName) {
+        var cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 16));
+        if (cell.value != null && cell.value.toString().trim() == groupName) {
           groupColIndex = col + (subgroup - 1);
           break;
         }
@@ -69,13 +95,13 @@ class ExcelParser {
           int r2 = r1 + 1;
 
           for (int row in [r1, r2]) {
-            var startCell = _getMergeStart(sheet, groupColIndex, row);
-            var val = sheet.cell(startCell).value;
+            var startCell = _getMergeStartFast(groupColIndex, row);
+            var cellValue = sheet.cell(startCell).value;
 
-            if (val != null && val.toString().trim().isNotEmpty) {
-              String cellAddress = startCell.toString();
+            if (cellValue != null && cellValue.toString().trim().isNotEmpty) {
+              String cellAddress = "${startCell.columnIndex}-${startCell.rowIndex}";
               if (!processedCells.contains(cellAddress)) {
-                _addLesson(val.toString(), timeSlots[pairIdx], day + 1, subgroup, lessons);
+                _addLesson(cellValue.toString(), timeSlots[pairIdx], day + 1, subgroup, lessons);
                 processedCells.add(cellAddress);
               }
             }
@@ -83,36 +109,13 @@ class ExcelParser {
         }
       }
     } catch (e) {
-      print("Ошибка парсинга байтов для группы $groupName: $e");
+      print("Ошибка парсинга группы $groupName: $e");
     }
     return lessons;
   }
 
-  // (устарело, удалить)
-  Future<List<String>> getGroups() async {
-    ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
-    return getGroupsFromBytes(data.buffer.asUint8List());
-  }
-
-  Future<List<Lesson>> parseSchedule(String groupName, {int subgroup = 1}) async {
-    ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
-    return parseScheduleFromBytes(data.buffer.asUint8List(), groupName, subgroup: subgroup);
-  }
-
-  CellIndex _getMergeStart(Sheet sheet, int col, int row) {
-    for (var span in sheet.spannedItems) {
-      final range = span.toString().split('!').last.replaceAll('\$', '');
-      final parts = range.split(':');
-      if (parts.length == 2) {
-        final start = CellIndex.indexByString(parts[0]);
-        final end = CellIndex.indexByString(parts[1]);
-        if (row >= start.rowIndex && row <= end.rowIndex &&
-            col >= start.columnIndex && col <= end.columnIndex) {
-          return start;
-        }
-      }
-    }
-    return CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row);
+  void clearCache() {
+    _spansCache = null;
   }
 
   void _addLesson(String rawText, String time, int day, int sub, List<Lesson> lessons) {
@@ -171,10 +174,5 @@ class ExcelParser {
         rawText: text,
       ));
     }
-  }
-
-  dynamic _getCellValue(Sheet sheet, int col, int row) {
-    var startCell = _getMergeStart(sheet, col, row);
-    return sheet.cell(startCell).value;
   }
 }

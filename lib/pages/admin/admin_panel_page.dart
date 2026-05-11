@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_project/design/colors.dart';
@@ -62,18 +63,14 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   }
 
   Future<void> _pickAndImportSchedule() async {
-    // выбираем файл локально
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
-      withData: true, // получаем байты файла в память
+      withData: true,
     );
 
     if (result == null || result.files.isEmpty) return;
-    
     Uint8List? fileBytes = result.files.first.bytes;
-    String fileName = result.files.first.name;
-
     if (fileBytes == null) return;
 
     if (!mounted) return;
@@ -83,14 +80,15 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
       builder: (c) => const Center(
         child: Card(
           child: Padding(
-            padding: EdgeInsets.all(20.0),
+            padding: EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text("Обработка расписания...", style: TextStyle(fontWeight: FontWeight.bold)),
-                Text("Парсим Excel и обновляем базу данных", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                SizedBox(height: 20),
+                Text("Импорт расписания...", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                SizedBox(height: 8),
+                Text("Это займет около 10-20 секунд", style: TextStyle(fontSize: 13, color: Colors.grey)),
               ],
             ),
           ),
@@ -99,22 +97,31 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
 
     try {
-      // получаем список групп из байтов
-      final groups = await _excelParser.getGroupsFromBytes(fileBytes);
-      if (groups.isEmpty) throw "Список групп в файле пуст или формат неверен";
+      // 1. Декодируем Excel ОДИН раз (самая тяжелая операция)
+      final Excel excel = _excelParser.decode(fileBytes);
+      
+      // 2. Получаем список групп
+      final groups = _excelParser.getGroupsFromExcel(excel);
+      if (groups.isEmpty) throw "Список групп пуст или формат файла неверен";
 
       List<String> allGroupSubgroups = [];
       Map<String, List<Map<String, dynamic>>> teacherSchedules = {};
+      
+      // Список для сбора всех Future (задач на запись в БД)
+      List<Future> dbTasks = [];
 
-      // парсим данные
+      // 3. Парсим данные (теперь это мгновенно, т.к. excel уже в памяти)
       for (String groupName in groups) {
         for (int subgroup in [1, 2]) {
-          final lessons = await _excelParser.parseScheduleFromBytes(fileBytes, groupName, subgroup: subgroup);
+          final lessons = _excelParser.parseScheduleFromExcel(excel, groupName, subgroup: subgroup);
           if (lessons.isNotEmpty) {
             final String fullId = "$groupName ($subgroup)";
-            await _db.saveSchedule(fullId, lessons);
             allGroupSubgroups.add(fullId);
+            
+            // Добавляем задачу сохранения группы
+            dbTasks.add(_db.saveSchedule(fullId, lessons));
 
+            // Собираем данные для преподавателей
             for (var l in lessons) {
               if (l.teacher.isNotEmpty) {
                 final teacherName = l.teacher.trim();
@@ -153,26 +160,30 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
         }
       }
 
-      // сохраняем оптимизированные данные для преподавателей
+      // 4. Добавляем задачи сохранения расписаний преподавателей
       for (var teacherName in teacherSchedules.keys) {
-        await _db.saveTeacherSchedule(teacherName, teacherSchedules[teacherName]!);
+        dbTasks.add(_db.saveTeacherSchedule(teacherName, teacherSchedules[teacherName]!));
       }
 
+      // 5. Выполняем ВСЕ записи в базу параллельно
+      await Future.wait(dbTasks);
+
+      // 6. Финальные штрихи (метаданные)
       allGroupSubgroups.sort();
       await _db.saveGroupsList(allGroupSubgroups);
       await _db.syncTeachersFromSchedules();
 
       if (mounted) {
-        Navigator.pop(context); // Закрываем диалог
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Расписание из файла $fileName успешно импортировано")),
+          SnackBar(content: Text("Импорт завершен: ${allGroupSubgroups.length} групп")),
         );
       }
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка: $e"), backgroundColor: Colors.red),
+          SnackBar(content: Text("Ошибка импорта: $e"), backgroundColor: Colors.red),
         );
       }
     }

@@ -18,7 +18,7 @@ class ExcelParser {
     "19:10 - 20:40",
   ];
 
-  // Основной метод для получения списка групп из байтов файла
+  // получение списка групп
   Future<List<String>> getGroupsFromBytes(Uint8List bytes) async {
     try {
       var excel = Excel.decodeBytes(bytes);
@@ -42,7 +42,7 @@ class ExcelParser {
     }
   }
 
-  // Основной метод для парсинга конкретной группы из байтов
+  // парсинг конкретной группы
   Future<List<Lesson>> parseScheduleFromBytes(Uint8List bytes, String groupName, {int subgroup = 1}) async {
     List<Lesson> lessons = [];
     try {
@@ -88,7 +88,7 @@ class ExcelParser {
     return lessons;
   }
 
-  // УСТАРЕВШИЕ МЕТОДЫ (для поддержки совместимости, если где-то остались)
+  // (устарело, удалить)
   Future<List<String>> getGroups() async {
     ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
     return getGroupsFromBytes(data.buffer.asUint8List());

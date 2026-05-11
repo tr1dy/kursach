@@ -21,7 +21,7 @@ class FirebaseStream extends StatelessWidget {
         }
         
         if (snapshot.hasData) {
-          // Временно отключаем проверку подтверждения почты для тестов
+          // временно отключаем проверку подтверждения почты для тестов
           /*
           final user = snapshot.data!;
           if (!user.emailVerified) {

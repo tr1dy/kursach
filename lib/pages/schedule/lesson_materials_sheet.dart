@@ -41,10 +41,10 @@ class _LessonMaterialsSheetState extends State<LessonMaterialsSheet> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     
-    // Загружаем материалы от преподавателя
+    // загружаем материалы от преподавателя
     final material = await _db.getLessonMaterial(widget.lessonKey);
     
-    // Загружаем личную заметку студента
+    // загружаем личную заметку студента
     UserNote? note;
     if (_currentUser != null) {
       note = await _db.getNote(_currentUser!.uid, widget.lessonKey);
@@ -128,7 +128,7 @@ class _LessonMaterialsSheetState extends State<LessonMaterialsSheet> {
                 child: CircularProgressIndicator(),
               ))
             else ...[
-              // РАЗДЕЛ: МАТЕРИАЛЫ ПРЕПОДАВАТЕЛЯ
+              // МАТЕРИАЛЫ ПРЕПОДАВАТЕЛЯ
               const Text("Материалы и задания:", style: TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               if (widget.canEdit)
@@ -178,7 +178,7 @@ class _LessonMaterialsSheetState extends State<LessonMaterialsSheet> {
               const Divider(),
               const SizedBox(height: 10),
 
-              // РАЗДЕЛ: ЛИЧНЫЕ ЗАМЕТКИ СТУДЕНТА (не видны преподавателю в режиме правки)
+              // ЛИЧНЫЕ ЗАМЕТКИ
               if (!widget.canEdit) ...[
                 const Text("Мои личные заметки:", style: TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),

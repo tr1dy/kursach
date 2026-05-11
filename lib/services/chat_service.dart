@@ -4,14 +4,14 @@ import '../../models/chat_message.dart';
 class ChatService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Генерируем уникальный ID комнаты для двух пользователей
+  // генерируем уникальный ID комнаты для двух пользователей
   String getChatRoomId(String userId1, String userId2) {
     List<String> ids = [userId1, userId2];
-    ids.sort(); // Сортируем по алфавиту
+    ids.sort(); // сортируем по алфавиту
     return ids.join('_');
   }
 
-  // Получаем поток сообщений
+  // получаем поток сообщений
   Stream<List<ChatMessage>> getMessages(String chatId) {
     return _db
         .collection('chats')
@@ -24,16 +24,16 @@ class ChatService {
         .toList());
   }
 
-  // Отправка сообщения с инициализацией чата
+  // отправка сообщения с инициализацией чата
   Future<void> sendMessage(String chatId, ChatMessage message, List<String> participants) async {
-    // 1. Создаем/обновляем заголовок чата, чтобы он появился в списке активных
+    // создаем/обновляем заголовок чата, чтобы он появился в списке активных
     await _db.collection('chats').doc(chatId).set({
       'participants': participants,
       'lastMessage': message.text,
       'lastMessageTimestamp': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    // 2. Добавляем само сообщение
+    // добавляем само сообщение
     await _db
         .collection('chats')
         .doc(chatId)

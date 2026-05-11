@@ -48,8 +48,6 @@ class _GroupSearchPageState extends State<GroupSearchPage> {
   }
 
   Future<void> _selectGroup(String groupName) async {
-    // Мы сохраняем "чистое" имя группы и подгруппу отдельно.
-    // Позже при загрузке расписания мы будем обращаться к "Имя (Подгруппа)" в БД.
     await _settings.saveGroup(groupName);
     await _settings.saveSubgroup(_selectedSubgroup);
     if (mounted) {

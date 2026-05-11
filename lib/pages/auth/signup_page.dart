@@ -169,12 +169,7 @@ class _SignUpScreen extends State<SignUpScreen> {
                   onChanged: (val) => setState(() => selectedGroup = val),
                   validator: (val) => val == null ? 'Обязательное поле' : null,
                 ),
-              
-              const SizedBox(height: 10),
-              const Text(
-                "ℹ️ Роль преподавателя назначается администратором после регистрации.",
-                style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic),
-              ),
+
               
               const SizedBox(height: 20),
               TextFormField(

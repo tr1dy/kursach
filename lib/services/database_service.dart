@@ -17,7 +17,7 @@ class DatabaseService {
       'role': role,
       'group': group,
       'teacherName': teacherName,
-      'isAdmin': false, // УБРАН ХАРДКОД. Теперь права выдаются только вручную в консоли Firebase.
+      'isAdmin': false, // права выдаются только вручную через консоль
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -44,7 +44,7 @@ class DatabaseService {
     }, SetOptions(merge: true));
   }
 
-  // Получение активных чатов пользователя
+  // получение активных чатов пользователя
   Stream<List<Map<String, dynamic>>> getActiveChats(String currentUserId) {
     return _db.collection('chats')
         .where('participants', arrayContains: currentUserId)
@@ -78,9 +78,8 @@ class DatabaseService {
     await _db.collection('materials').doc(material.lessonKey).set(material.toMap());
   }
 
-  // РАСПИСАНИЕ ПРЕПОДАВАТЕЛЯ (ОПТИМИЗИРОВАНО)
+  // РАСПИСАНИЕ ПРЕПОДАВАТЕЛЯ
   Future<List<Map<String, dynamic>>> getTeacherSchedule(String teacherShortName) async {
-    // Теперь мы просто берем один документ конкретного преподавателя!
     final doc = await _db.collection('teacher_schedules').doc(teacherShortName).get();
     if (!doc.exists) return [];
     
@@ -88,7 +87,7 @@ class DatabaseService {
     return List<Map<String, dynamic>>.from(lessons);
   }
 
-  // Сохранение расписания конкретного преподавателя (вызывается при импорте)
+  // сохранение расписания конкретного преподавателя (вызывается при импорте)
   Future<void> saveTeacherSchedule(String teacherShortName, List<Map<String, dynamic>> lessons) async {
     await _db.collection('teacher_schedules').doc(teacherShortName).set({
       'lessons': lessons,

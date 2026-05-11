@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class UserNote {
   final String id;
   final String userId;
-  final String lessonKey; // Уникальный ключ занятия (напр. "группа_название_день_время")
+  final String lessonKey; // Уникальный ключ занятия
   final String text;
   final DateTime updatedAt;
 

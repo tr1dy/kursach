@@ -62,11 +62,11 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   }
 
   Future<void> _pickAndImportSchedule() async {
-    // 1. Выбираем файл локально
+    // выбираем файл локально
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
-      withData: true, // Это важно: получаем байты файла в память
+      withData: true, // получаем байты файла в память
     );
 
     if (result == null || result.files.isEmpty) return;
@@ -99,14 +99,14 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     );
 
     try {
-      // 2. Получаем список групп из байтов (БЕЗ загрузки в Storage)
+      // получаем список групп из байтов
       final groups = await _excelParser.getGroupsFromBytes(fileBytes);
       if (groups.isEmpty) throw "Список групп в файле пуст или формат неверен";
 
       List<String> allGroupSubgroups = [];
       Map<String, List<Map<String, dynamic>>> teacherSchedules = {};
 
-      // 3. Парсим данные
+      // парсим данные
       for (String groupName in groups) {
         for (int subgroup in [1, 2]) {
           final lessons = await _excelParser.parseScheduleFromBytes(fileBytes, groupName, subgroup: subgroup);
@@ -153,7 +153,7 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
         }
       }
 
-      // 4. Сохраняем оптимизированные данные для преподавателей
+      // сохраняем оптимизированные данные для преподавателей
       for (var teacherName in teacherSchedules.keys) {
         await _db.saveTeacherSchedule(teacherName, teacherSchedules[teacherName]!);
       }

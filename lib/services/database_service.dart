@@ -17,7 +17,7 @@ class DatabaseService {
       'role': role,
       'group': group,
       'teacherName': teacherName,
-      'isAdmin': email == "lvov.dima2018@yandex.ru",
+      'isAdmin': false, // УБРАН ХАРДКОД. Теперь права выдаются только вручную в консоли Firebase.
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -78,45 +78,26 @@ class DatabaseService {
     await _db.collection('materials').doc(material.lessonKey).set(material.toMap());
   }
 
-  // РАСПИСАНИЕ ПРЕПОДАВАТЕЛЯ
+  // РАСПИСАНИЕ ПРЕПОДАВАТЕЛЯ (ОПТИМИЗИРОВАНО)
   Future<List<Map<String, dynamic>>> getTeacherSchedule(String teacherShortName) async {
-    final snapshot = await _db.collection('schedules').get();
-    Map<String, Map<String, dynamic>> groupedLessons = {};
+    // Теперь мы просто берем один документ конкретного преподавателя!
+    final doc = await _db.collection('teacher_schedules').doc(teacherShortName).get();
+    if (!doc.exists) return [];
+    
+    List<dynamic> lessons = doc.data()?['lessons'] ?? [];
+    return List<Map<String, dynamic>>.from(lessons);
+  }
 
-    for (var doc in snapshot.docs) {
-      final String groupName = doc.id;
-      final List<dynamic> lessons = doc.data()['lessons'] ?? [];
-      for (var lessonData in lessons) {
-        if (lessonData['teacher'] == teacherShortName) {
-          // В ключе теперь учитываем тип недели и сами недели, чтобы не склеивать разные пары
-          final String key = "${lessonData['dayOfWeek']}_${lessonData['time']}_${lessonData['name']}_${lessonData['weekType']}_${lessonData['weeks']}";
-          
-          if (groupedLessons.containsKey(key)) {
-            List<String> groups = List<String>.from(groupedLessons[key]!['targetGroups']);
-            if (!groups.contains(groupName)) {
-              groups.add(groupName);
-              groupedLessons[key]!['targetGroups'] = groups;
-            }
-          } else {
-            Map<String, dynamic> newLesson = Map<String, dynamic>.from(lessonData);
-            newLesson['targetGroups'] = [groupName];
-            groupedLessons[key] = newLesson;
-          }
-        }
-      }
-    }
-    List<Map<String, dynamic>> result = groupedLessons.values.toList();
-    result.sort((a, b) {
-      int dayComp = a['dayOfWeek'].compareTo(b['dayOfWeek']);
-      if (dayComp != 0) return dayComp;
-      return a['time'].compareTo(b['time']);
+  // Сохранение расписания конкретного преподавателя (вызывается при импорте)
+  Future<void> saveTeacherSchedule(String teacherShortName, List<Map<String, dynamic>> lessons) async {
+    await _db.collection('teacher_schedules').doc(teacherShortName).set({
+      'lessons': lessons,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
-    return result;
   }
 
   // РАСПИСАНИЕ ГРУППЫ
   Future<List<Lesson>> getSchedule(String groupName) async {
-    // Попробуем сначала получить данные из кэша для мгновенного отображения (п. 5)
     try {
       final cacheDoc = await _db.collection('schedules').doc(groupName).get(const GetOptions(source: Source.cache));
       if (cacheDoc.exists) {

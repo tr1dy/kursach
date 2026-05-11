@@ -1,15 +1,12 @@
+import 'dart:typed_data';
 import 'package:excel/excel.dart';
-import 'package:flutter/services.dart' show rootBundle, ByteData;
+import 'package:flutter/services.dart' show rootBundle;
 import '../models/lesson.dart';
 
 class ExcelParser {
   static List<Lesson>? _cachedLessons;
   static String? _cachedGroupName;
   static int? _cachedSubgroup;
-  static List<String>? _cachedGroupsList;
-
-  // Текущий файл расписания в ассетах
-  static const String currentExcelPath = "assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx";
 
   final List<String> timeSlots = [
     "08:30 - 10:00",
@@ -21,11 +18,10 @@ class ExcelParser {
     "19:10 - 20:40",
   ];
 
-  Future<List<String>> getGroups() async {
-    if (_cachedGroupsList != null) return _cachedGroupsList!;
+  // Основной метод для получения списка групп из байтов файла
+  Future<List<String>> getGroupsFromBytes(Uint8List bytes) async {
     try {
-      ByteData data = await rootBundle.load(currentExcelPath);
-      var excel = Excel.decodeBytes(data.buffer.asUint8List());
+      var excel = Excel.decodeBytes(bytes);
       var sheet = excel.tables.values.first;
       Set<String> groups = {};
 
@@ -33,36 +29,30 @@ class ExcelParser {
         var val = _getCellValue(sheet, col, 16);
         if (val != null) {
           String s = val.toString().trim();
-          // Простая проверка, что это похоже на номер группы (например, 09-332)
           if (s.length >= 5 && (s.contains('-') || s.startsWith('09-'))) {
             groups.add(s);
           }
         }
       }
-      _cachedGroupsList = groups.toList()..sort();
-      return _cachedGroupsList!;
+      var list = groups.toList()..sort();
+      return list;
     } catch (e) {
-      print("Ошибка получения списка групп: $e");
+      print("Ошибка получения групп из байтов: $e");
       return [];
     }
   }
 
-  Future<List<Lesson>> parseSchedule(String groupName, {int subgroup = 1, bool clearCache = false}) async {
-    if (!clearCache && _cachedLessons != null && _cachedGroupName == groupName && _cachedSubgroup == subgroup) {
-      return _cachedLessons!;
-    }
-
+  // Основной метод для парсинга конкретной группы из байтов
+  Future<List<Lesson>> parseScheduleFromBytes(Uint8List bytes, String groupName, {int subgroup = 1}) async {
     List<Lesson> lessons = [];
     try {
-      ByteData data = await rootBundle.load(currentExcelPath);
-      var excel = Excel.decodeBytes(data.buffer.asUint8List());
+      var excel = Excel.decodeBytes(bytes);
       var sheet = excel.tables.values.first;
 
       int groupColIndex = -1;
       for (int col = 0; col < sheet.maxColumns; col++) {
         var val = _getCellValue(sheet, col, 16);
         if (val != null && val.toString().trim() == groupName) {
-          // Обычно подгруппа 1 - это колонка группы, подгруппа 2 - следующая
           groupColIndex = col + (subgroup - 1);
           break;
         }
@@ -92,13 +82,21 @@ class ExcelParser {
           }
         }
       }
-      _cachedLessons = lessons;
-      _cachedGroupName = groupName;
-      _cachedSubgroup = subgroup;
     } catch (e) {
-      print("Ошибка парсинга группы $groupName: $e");
+      print("Ошибка парсинга байтов для группы $groupName: $e");
     }
     return lessons;
+  }
+
+  // УСТАРЕВШИЕ МЕТОДЫ (для поддержки совместимости, если где-то остались)
+  Future<List<String>> getGroups() async {
+    ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
+    return getGroupsFromBytes(data.buffer.asUint8List());
+  }
+
+  Future<List<Lesson>> parseSchedule(String groupName, {int subgroup = 1}) async {
+    ByteData data = await rootBundle.load("assets/data/Raspisanie_2_sem_2025_2026_ot_03.03.2026.xlsx");
+    return parseScheduleFromBytes(data.buffer.asUint8List(), groupName, subgroup: subgroup);
   }
 
   CellIndex _getMergeStart(Sheet sheet, int col, int row) {
@@ -119,7 +117,6 @@ class ExcelParser {
 
   void _addLesson(String rawText, String time, int day, int sub, List<Lesson> lessons) {
     List<String> rawParts = rawText.split(';');
-
     for (String part in rawParts) {
       String text = part.replaceAll('\n', ' ').trim();
       if (text.length < 3) continue;
@@ -162,12 +159,8 @@ class ExcelParser {
         type = WeekType.even;
       }
 
-      if (name.isEmpty) {
-        name = "Неизвестный предмет (ошибка парсинга)";
-      }
-
       lessons.add(Lesson(
-        name: name,
+        name: name.isEmpty ? "Неизвестный предмет" : name,
         teacher: teacher,
         room: room,
         weeks: weeks,

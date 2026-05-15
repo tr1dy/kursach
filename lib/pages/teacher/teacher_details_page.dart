@@ -19,12 +19,29 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
   final DatabaseService _db = DatabaseService();
   final User? currentUser = FirebaseAuth.instance.currentUser;
   bool _hasReviewed = false;
+  bool _isAdmin = false;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _checkReviewStatus();
+    _loadInitialData();
+  }
+
+  Future<void> _loadInitialData() async {
+    if (currentUser != null) {
+      final hasReviewed = await _db.hasUserReviewedTeacher(widget.teacher.id, currentUser!.uid);
+      final userData = await _db.getUserData(currentUser!.uid);
+      if (mounted) {
+        setState(() {
+          _hasReviewed = hasReviewed;
+          _isAdmin = userData?['isAdmin'] ?? false;
+          _isLoading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _checkReviewStatus() async {
@@ -33,11 +50,8 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
       if (mounted) {
         setState(() {
           _hasReviewed = hasReviewed;
-          _isLoading = false;
         });
       }
-    } else {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -108,7 +122,10 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
 
                     await _db.saveTeacherReview(widget.teacher.id, review);
                     if (mounted) {
-                      Navigator.pop(context);
+                      Navigator.pop(context); // Закрываем окно отзыва
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Отзыв успешно опубликован")),
+                      );
                       _checkReviewStatus();
                     }
                   },
@@ -137,6 +154,7 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 1,
+        centerTitle: true,
         title: Text(widget.teacher.shortName, style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
       ),
       body: _isLoading 
@@ -199,7 +217,6 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
             ],
           ),
           const SizedBox(height: 20),
-          // КНОПКА ПРОСМОТРА РАСПИСАНИЯ
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -270,11 +287,22 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
                     children: [
                       Text(review.userName, style: const TextStyle(fontWeight: FontWeight.bold)),
                       Row(
-                        children: List.generate(5, (i) => Icon(
-                          Icons.star,
-                          size: 14,
-                          color: i < review.rating ? Colors.amber : Colors.grey.shade300,
-                        )),
+                        children: [
+                          ...List.generate(5, (i) => Icon(
+                            Icons.star,
+                            size: 14,
+                            color: i < review.rating ? Colors.amber : Colors.grey.shade300,
+                          )),
+                          if (_isAdmin) ...[
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _confirmDeleteReview(review.id),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -291,6 +319,29 @@ class _TeacherDetailsPageState extends State<TeacherDetailsPage> {
           },
         );
       },
+    );
+  }
+
+  void _confirmDeleteReview(String reviewId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Удалить отзыв?"),
+        content: const Text("Это действие нельзя будет отменить."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
+          TextButton(
+            onPressed: () async {
+              await _db.deleteTeacherReview(widget.teacher.id, reviewId);
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Отзыв удален")));
+              }
+            },
+            child: const Text("Удалить", style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
     );
   }
 }

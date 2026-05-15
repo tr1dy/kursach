@@ -71,6 +71,7 @@ class _LessonMaterialsSheetState extends State<LessonMaterialsSheet> {
 
     await _db.saveLessonMaterial(newMaterial);
     if (mounted) {
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Материалы пары обновлены")),
       );
@@ -87,8 +88,9 @@ class _LessonMaterialsSheetState extends State<LessonMaterialsSheet> {
     );
     
     if (mounted) {
+      Navigator.pop(context); // Теперь закрывается при сохранении
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Личная заметка сохранена")),
+        const SnackBar(content: Text("Записка успешно сохранена")),
       );
     }
   }

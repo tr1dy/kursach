@@ -85,7 +85,7 @@ class _SchedulePageState extends State<SchedulePage> {
         }
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -99,34 +99,44 @@ class _SchedulePageState extends State<SchedulePage> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadTeacherSchedule() async {
-    if (_teacherName == null) return;
+    if (_teacherName == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final rawData = await _db.getTeacherSchedule(_teacherName!);
-      final results = rawData.map((item) => Lesson(
-        name: item['name'],
-        teacher: item['teacher'],
-        room: item['room'],
-        time: item['time'],
-        dayOfWeek: item['dayOfWeek'],
-        weekType: WeekType.values[item['weekType']],
-        subgroup: item['subgroup'],
-        weeks: item['weeks'] ?? "",
-        rawText: item['rawText'] ?? "",
-        targetGroups: List<String>.from(item['targetGroups'] ?? []),
-      )).toList();
+      final results = rawData.map((item) {
+        // Безопасное получение типа недели
+        int weekTypeIdx = item['weekType'] ?? 2; // По умолчанию 'both'
+        if (weekTypeIdx < 0 || weekTypeIdx >= WeekType.values.length) weekTypeIdx = 2;
+
+        return Lesson(
+          name: item['name'] ?? "Без названия",
+          teacher: item['teacher'] ?? "",
+          room: item['room'] ?? "",
+          time: item['time'] ?? "--:--",
+          dayOfWeek: item['dayOfWeek'] ?? 1,
+          weekType: WeekType.values[weekTypeIdx],
+          subgroup: 1, // Для преподавателя не критично
+          weeks: item['weeks'] ?? "",
+          rawText: item['rawText'] ?? "",
+          targetGroups: List<String>.from(item['targetGroups'] ?? []),
+        );
+      }).toList();
+
       setState(() {
         _allLessons = results;
         _filterLessons();
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -277,6 +287,9 @@ class _SchedulePageState extends State<SchedulePage> {
     String groupKey = _isTeacherMode ? (lesson.targetGroups.isNotEmpty ? lesson.targetGroups.first : "Teacher") : _currentGroup;
     final lessonKey = "w${_selectedWeek}_${groupKey}_${lesson.dayOfWeek}_${lesson.name}_${lesson.time}";
 
+    // Проверяем, нужно ли показывать полный текст (если парсинг не удался)
+    bool showRawText = (lesson.name.contains("Неизвестный предмет") || lesson.name.isEmpty) && lesson.rawText.isNotEmpty;
+
     return Card(
       elevation: 0,
       color: Colors.white,
@@ -343,6 +356,22 @@ class _SchedulePageState extends State<SchedulePage> {
                 lesson.name, 
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
               ),
+              
+              if (showRawText)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Инфо:", style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
+                      Text(
+                        lesson.rawText,
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontStyle: FontStyle.italic),
+                      ),
+                    ],
+                  ),
+                ),
+
               if (!_isTeacherMode && lesson.teacher.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -374,15 +403,6 @@ class _SchedulePageState extends State<SchedulePage> {
                       )
                     ),
                   ],
-                ),
-              ],
-              if (lesson.rawText.isNotEmpty) ...[
-                const Divider(height: 24, thickness: 0.5),
-                Text("Инфо:", style: TextStyle(color: Colors.grey.shade500, fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(
-                  lesson.rawText, 
-                  style: TextStyle(color: Colors.grey.shade400, fontSize: 11, fontStyle: FontStyle.italic)
                 ),
               ],
             ],

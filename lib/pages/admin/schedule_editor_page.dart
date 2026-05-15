@@ -28,19 +28,23 @@ class _ScheduleEditorPageState extends State<ScheduleEditorPage> {
 
   Future<void> _loadGroups() async {
     final list = await _db.getGroupsList();
-    setState(() {
-      _groups = list;
-      _isLoadingGroups = false;
-    });
+    if (mounted) {
+      setState(() {
+        _groups = list;
+        _isLoadingGroups = false;
+      });
+    }
   }
 
   Future<void> _loadSchedule(String groupName) async {
     setState(() => _isLoadingSchedule = true);
     final lessons = await _db.getSchedule(groupName);
-    setState(() {
-      _lessons = lessons;
-      _isLoadingSchedule = false;
-    });
+    if (mounted) {
+      setState(() {
+        _lessons = lessons;
+        _isLoadingSchedule = false;
+      });
+    }
   }
 
   void _editLesson(int index) {
@@ -95,16 +99,48 @@ class _ScheduleEditorPageState extends State<ScheduleEditorPage> {
     );
   }
 
+  void _deleteLesson(int index) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Удалить пару?"),
+        content: Text("Вы уверены, что хотите удалить ${_lessons[index].name}?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _lessons.removeAt(index);
+              });
+              Navigator.pop(context);
+            },
+            child: const Text("Удалить", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveAll() async {
     if (_selectedGroup == null) return;
     
-    showDialog(context: context, builder: (c) => const Center(child: CircularProgressIndicator()));
-    await _db.saveSchedule(_selectedGroup!, _lessons);
-    Navigator.pop(context);
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Расписание группы успешно сохранено")),
-    );
+    showDialog(context: context, barrierDismissible: false, builder: (c) => const Center(child: CircularProgressIndicator()));
+    try {
+      await _db.saveSchedule(_selectedGroup!, _lessons);
+      if (mounted) {
+        Navigator.pop(context); // Close loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Расписание группы успешно сохранено")),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка при сохранении: $e")),
+        );
+      }
+    }
   }
 
   @override
@@ -112,14 +148,16 @@ class _ScheduleEditorPageState extends State<ScheduleEditorPage> {
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text("Редактор расписания"),
+        title: const Text("Редактор расписания", style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         elevation: 1,
+        centerTitle: true,
         actions: [
           if (_selectedGroup != null)
-            TextButton(
+            IconButton(
               onPressed: _saveAll,
-              child: const Text("СОХРАНИТЬ", style: TextStyle(color: currentIcon, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.save, color: currentIcon),
             ),
         ],
       ),
@@ -129,11 +167,20 @@ class _ScheduleEditorPageState extends State<ScheduleEditorPage> {
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: _isLoadingGroups 
-              ? const CircularProgressIndicator()
+              ? const Center(child: CircularProgressIndicator())
               : DropdownButtonFormField<String>(
+                  isExpanded: true, // Исправление overflow
                   value: _selectedGroup,
-                  decoration: const InputDecoration(labelText: "Выберите группу", border: OutlineInputBorder()),
-                  items: _groups.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+                  decoration: const InputDecoration(
+                    labelText: "Выберите группу", 
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  items: _groups.map((g) => DropdownMenuItem(
+                    value: g, 
+                    child: Text(g, overflow: TextOverflow.ellipsis) // Исправление overflow
+                  )).toList(),
                   onChanged: (val) {
                     setState(() => _selectedGroup = val);
                     if (val != null) _loadSchedule(val);
@@ -152,16 +199,29 @@ class _ScheduleEditorPageState extends State<ScheduleEditorPage> {
                         final lesson = _lessons[index];
                         final dayName = _weekDays[lesson.dayOfWeek - 1];
                         return Card(
+                          elevation: 0,
                           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: backgroundColor,
-                              child: Text(dayName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              child: Text(dayName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: currentIcon)),
                             ),
-                            title: Text(lesson.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text("${lesson.time} | ${lesson.room}\n${lesson.teacher}"),
-                            trailing: const Icon(Icons.edit, size: 20),
-                            onTap: () => _editLesson(index),
+                            title: Text(lesson.name, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                            subtitle: Text("${lesson.time} | ${lesson.room}\n${lesson.teacher}", maxLines: 2),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blueGrey),
+                                  onPressed: () => _editLesson(index),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                                  onPressed: () => _deleteLesson(index),
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       },

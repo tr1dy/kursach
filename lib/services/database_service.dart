@@ -8,6 +8,11 @@ import '../models/lesson_material.dart';
 class DatabaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // Вспомогательный метод для очистки ключей документов от недопустимых символов (например, '/')
+  String _sanitizeKey(String key) {
+    return key.replaceAll('/', '_');
+  }
+
   // ПОЛЬЗОВАТЕЛИ
   Future<void> createUserProfile(String uid, String email, String name, {String role = 'student', String? group, String? teacherName}) async {
     await _db.collection('users').doc(uid).set({
@@ -17,7 +22,7 @@ class DatabaseService {
       'role': role,
       'group': group,
       'teacherName': teacherName,
-      'isAdmin': false, // права выдаются только вручную через консоль
+      'isAdmin': false,
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
@@ -44,7 +49,6 @@ class DatabaseService {
     }, SetOptions(merge: true));
   }
 
-  // получение активных чатов пользователя
   Stream<List<Map<String, dynamic>>> getActiveChats(String currentUserId) {
     return _db.collection('chats')
         .where('participants', arrayContains: currentUserId)
@@ -69,13 +73,15 @@ class DatabaseService {
 
   // МАТЕРИАЛЫ
   Future<LessonMaterial?> getLessonMaterial(String lessonKey) async {
-    final doc = await _db.collection('materials').doc(lessonKey).get();
+    final safeKey = _sanitizeKey(lessonKey);
+    final doc = await _db.collection('materials').doc(safeKey).get();
     if (!doc.exists) return null;
     return LessonMaterial.fromMap(doc.data()!, doc.id);
   }
 
   Future<void> saveLessonMaterial(LessonMaterial material) async {
-    await _db.collection('materials').doc(material.lessonKey).set(material.toMap());
+    final safeKey = _sanitizeKey(material.lessonKey);
+    await _db.collection('materials').doc(safeKey).set(material.toMap());
   }
 
   // РАСПИСАНИЕ ПРЕПОДАВАТЕЛЯ
@@ -87,7 +93,6 @@ class DatabaseService {
     return List<Map<String, dynamic>>.from(lessons);
   }
 
-  // сохранение расписания конкретного преподавателя (вызывается при импорте)
   Future<void> saveTeacherSchedule(String teacherShortName, List<Map<String, dynamic>> lessons) async {
     await _db.collection('teacher_schedules').doc(teacherShortName).set({
       'lessons': lessons,
@@ -113,7 +118,7 @@ class DatabaseService {
     if (data == null) return [];
     return (data['lessons'] as List).map((item) => Lesson(
       name: item['name'], teacher: item['teacher'], room: item['room'], time: item['time'],
-      dayOfWeek: item['dayOfWeek'], weekType: WeekType.values[item['weekType']], subgroup: item['subgroup'], 
+      dayOfWeek: item['dayOfWeek'], weekType: WeekType.values[item['weekType'] ?? 2], subgroup: 1, 
       weeks: item['weeks'] ?? "", rawText: item['rawText'] ?? "",
     )).toList();
   }
@@ -183,19 +188,34 @@ class DatabaseService {
 
   Future<void> saveTeacherReview(String teacherId, TeacherReview review) async {
     await _db.collection('teachers').doc(teacherId).collection('reviews').add(review.toMap());
+    await _updateTeacherRating(teacherId);
+  }
+
+  Future<void> deleteTeacherReview(String teacherId, String reviewId) async {
+    await _db.collection('teachers').doc(teacherId).collection('reviews').doc(reviewId).delete();
+    await _updateTeacherRating(teacherId);
+  }
+
+  Future<void> _updateTeacherRating(String teacherId) async {
     final s = await _db.collection('teachers').doc(teacherId).collection('reviews').get();
+    if (s.docs.isEmpty) {
+      await _db.collection('teachers').doc(teacherId).update({'rating': 0.0});
+      return;
+    }
     double avg = s.docs.fold(0.0, (prev, d) => prev + (d.data()['rating'] ?? 0.0)) / s.docs.length;
     await _db.collection('teachers').doc(teacherId).update({'rating': avg});
   }
 
   Future<UserNote?> getNote(String userId, String lessonKey) async {
-    final s = await _db.collection('notes').where('userId', isEqualTo: userId).where('lessonKey', isEqualTo: lessonKey).get();
+    final safeKey = _sanitizeKey(lessonKey);
+    final s = await _db.collection('notes').where('userId', isEqualTo: userId).where('lessonKey', isEqualTo: safeKey).get();
     return s.docs.isEmpty ? null : UserNote.fromMap(s.docs.first.data(), s.docs.first.id);
   }
 
   Future<void> saveNote(String userId, String lessonKey, String text) async {
-    final s = await _db.collection('notes').where('userId', isEqualTo: userId).where('lessonKey', isEqualTo: lessonKey).get();
-    if (s.docs.isEmpty) await _db.collection('notes').add({'userId': userId, 'lessonKey': lessonKey, 'text': text, 'updatedAt': FieldValue.serverTimestamp()});
+    final safeKey = _sanitizeKey(lessonKey);
+    final s = await _db.collection('notes').where('userId', isEqualTo: userId).where('lessonKey', isEqualTo: safeKey).get();
+    if (s.docs.isEmpty) await _db.collection('notes').add({'userId': userId, 'lessonKey': safeKey, 'text': text, 'updatedAt': FieldValue.serverTimestamp()});
     else await _db.collection('notes').doc(s.docs.first.id).update({'text': text, 'updatedAt': FieldValue.serverTimestamp()});
   }
 }

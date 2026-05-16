@@ -88,9 +88,21 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getTeacherSchedule(String teacherShortName) async {
     final doc = await _db.collection('teacher_schedules').doc(teacherShortName).get();
     if (!doc.exists) return [];
-    
-    List<dynamic> lessons = doc.data()?['lessons'] ?? [];
-    return List<Map<String, dynamic>>.from(lessons);
+
+    List<dynamic> lessonsRaw = doc.data()?['lessons'] ?? [];
+    List<Map<String, dynamic>> lessons = List<Map<String, dynamic>>.from(lessonsRaw);
+
+    // Сортировка: сначала по дню недели, потом по времени
+    lessons.sort((a, b) {
+      // Сравниваем дни недели (1-6)
+      int dayCompare = (a['dayOfWeek'] ?? 0).compareTo(b['dayOfWeek'] ?? 0);
+      if (dayCompare != 0) return dayCompare;
+
+      // Если день один и тот же, сравниваем время
+      return (a['time'] ?? "").toString().compareTo(b['time'] ?? "");
+    });
+
+    return lessons;
   }
 
   Future<void> saveTeacherSchedule(String teacherShortName, List<Map<String, dynamic>> lessons) async {
@@ -103,15 +115,15 @@ class DatabaseService {
   // РАСПИСАНИЕ ГРУППЫ
   Future<List<Lesson>> getSchedule(String groupName) async {
     try {
-      final cacheDoc = await _db.collection('schedules').doc(groupName).get(const GetOptions(source: Source.cache));
-      if (cacheDoc.exists) {
-        return _parseLessons(cacheDoc.data());
-      }
-    } catch (_) {}
-
-    final doc = await _db.collection('schedules').doc(groupName).get();
-    if (!doc.exists) return [];
-    return _parseLessons(doc.data());
+      // Стандартный get() сам сходит на сервер, а при отсутствии интернета - отдаст кэш
+      final doc = await _db.collection('schedules').doc(groupName).get();
+      if (!doc.exists) return [];
+      return _parseLessons(doc.data());
+    } catch (e) {
+      // Если интернета нет и в кэше тоже пусто
+      print("Ошибка загрузки расписания: $e");
+      return [];
+    }
   }
 
   List<Lesson> _parseLessons(Map<String, dynamic>? data) {

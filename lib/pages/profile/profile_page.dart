@@ -108,15 +108,6 @@ class _ProfilePageState extends State<ProfilePage> {
               backgroundColor: Colors.white,
               child: Icon(Icons.person, size: 70, color: currentIcon.withOpacity(0.8)),
             ),
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: currentIcon,
-                child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
-              ),
-            ),
           ],
         ),
         const SizedBox(height: 20),
